@@ -30,6 +30,7 @@ class Position:
     confidence: str       = ""
     opened_at: str        = ""
     pnl_realized: float   = 0.0       # Bereits realisierter P&L (nach TP1)
+    trailing_order_id: str = ""       # Server-Side SL-Order nach TP1
 
 
 def load_all() -> dict[str, Position]:

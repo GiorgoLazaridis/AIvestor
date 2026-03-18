@@ -82,6 +82,42 @@ def _check_oco_status(client, symbol: str, oco_id: str) -> str | None:
     return None
 
 
+def _cancel_order(client, symbol: str, order_id: str) -> None:
+    """Cancelt eine einzelne Order. Ignoriert Fehler wenn bereits geschlossen."""
+    if not order_id:
+        return
+    try:
+        client.cancel_order(symbol=symbol, orderId=int(order_id))
+    except BinanceAPIException as e:
+        if e.code != -2011:
+            raise
+
+
+def _place_stop_loss_order(client, pos: pm.Position, info: dict) -> str:
+    """
+    Platziert eine Server-Side Stop-Loss-Limit-Order für die verbleibende Qty.
+    Returns: orderId als String.
+    """
+    stop_price = _round_tick(pos.trailing_sl, info["tick_size"])
+    # Limit etwas unter Stop für schnellere Ausführung
+    limit_price = _round_tick(pos.trailing_sl * 0.9995, info["tick_size"])
+    qty = _round_step(pos.quantity_remaining, info["step_size"])
+
+    if qty <= 0:
+        return ""
+
+    order = client.create_order(
+        symbol=pos.symbol,
+        side="SELL",
+        type="STOP_LOSS_LIMIT",
+        timeInForce="GTC",
+        quantity=qty,
+        price=limit_price,
+        stopPrice=stop_price,
+    )
+    return str(order["orderId"])
+
+
 def open_long(signal: Signal) -> pm.Position:
     """
     Öffnet Long-Position:
@@ -143,13 +179,25 @@ def update_trailing_stop(pos: pm.Position, current_price: float) -> pm.Position:
     """
     Zieht den Trailing-Stop nach, wenn der Preis steigt.
     Neuer SL = Preis - (ATR * TRAIL_MULTIPLIER)
+    Nach TP1: Server-Side SL-Order wird mitgezogen (nur bei >= 0.1% Differenz).
     """
     if not pos.active or pos.side != "BUY":
         return pos
 
     new_trail = current_price - (pos.atr * config.TRAIL_ATR_MULTIPLIER)
     if new_trail > pos.trailing_sl:
+        old_trail = pos.trailing_sl
         pos.trailing_sl = round(new_trail, 2)
+
+        # Server-Side SL nachziehen (nur nach TP1, nur bei >= 0.1% Bewegung)
+        if pos.tp1_hit and pos.trailing_order_id:
+            diff_pct = (pos.trailing_sl - old_trail) / old_trail if old_trail > 0 else 1
+            if diff_pct >= 0.001:
+                client = get_client()
+                info = get_symbol_info(pos.symbol)
+                _cancel_order(client, pos.symbol, pos.trailing_order_id)
+                pos.trailing_order_id = _place_stop_loss_order(client, pos, info)
+
         pm.save(pos.symbol, pos)
     return pos
 
@@ -180,6 +228,8 @@ def check_and_handle_exits(pos: pm.Position, current_price: float) -> tuple[pm.P
             pos.trailing_sl = pos.entry_price
             pos.stop_loss   = pos.entry_price
             pos.oco_order_id = ""
+            # Server-Side SL für verbleibende Qty
+            pos.trailing_order_id = _place_stop_loss_order(client, pos, info)
             pm.save(pos.symbol, pos)
             return pos, f"TP1_HIT (OCO filled @ ~{pos.take_profit1:,.2f}) | +{pnl:.2f} USDT | SL auf Breakeven"
 
@@ -201,6 +251,7 @@ def check_and_handle_exits(pos: pm.Position, current_price: float) -> tuple[pm.P
     # ── Trailing-Stop gecheckt ────────────────────────────────
     if current_price <= pos.trailing_sl and pos.active:
         _cancel_oco(client, pos.symbol, pos.oco_order_id)
+        _cancel_order(client, pos.symbol, pos.trailing_order_id)
         _market_sell_remaining(client, pos, info)
         pnl = (pos.trailing_sl - pos.entry_price) * pos.quantity_remaining
         pos.pnl_realized += pnl
@@ -222,12 +273,15 @@ def check_and_handle_exits(pos: pm.Position, current_price: float) -> tuple[pm.P
         pos.trailing_sl = pos.entry_price  # SL auf Breakeven!
         pos.stop_loss   = pos.entry_price
         pos.oco_order_id = ""
+        # Server-Side SL für verbleibende Qty
+        pos.trailing_order_id = _place_stop_loss_order(client, pos, info)
         pm.save(pos.symbol, pos)
         return pos, f"TP1_HIT ({current_price:,.2f}) | +{pnl:.2f} USDT | SL auf Breakeven"
 
     # ── TP2 erreicht ─────────────────────────────────────────
     if pos.tp1_hit and current_price >= pos.take_profit2:
         _cancel_oco(client, pos.symbol, pos.oco_order_id)
+        _cancel_order(client, pos.symbol, pos.trailing_order_id)
         _market_sell_remaining(client, pos, info)
         pnl = (current_price - pos.entry_price) * pos.quantity_remaining
         pos.pnl_realized += pnl
@@ -250,6 +304,7 @@ def emergency_close(symbol: str) -> None:
         return
     client = get_client()
     _cancel_oco(client, symbol, pos.oco_order_id)
+    _cancel_order(client, symbol, pos.trailing_order_id)
     info   = get_symbol_info(symbol)
     qty    = _round_step(pos.quantity_remaining, info["step_size"])
     if qty > 0:
