@@ -26,9 +26,22 @@ def _round_tick(value: float, tick: float) -> str:
     return f"{round(math.floor(value / tick) * tick, precision):.{precision}f}"
 
 
-def _calc_qty(symbol: str, entry: float, stop_loss: float, high_conf: bool) -> float:
+def _calc_qty(symbol: str, entry: float, stop_loss: float,
+              high_conf: bool, kelly_risk_pct: float = 0) -> float:
+    """
+    Position-Sizing: Kelly-basiert wenn verfügbar, sonst fix.
+    Kelly wird vom Risk-Manager berechnet und hier übergeben.
+    """
     usdt = get_balance_usdt()
-    risk_pct = config.ACCOUNT_RISK_HIGH if high_conf else config.ACCOUNT_RISK_BASE
+
+    if kelly_risk_pct > 0:
+        # Kelly-Sizing (vom Risk Manager)
+        risk_pct = min(kelly_risk_pct, config.ACCOUNT_RISK_HIGH)
+        if high_conf:
+            risk_pct = min(risk_pct * 1.5, config.ACCOUNT_RISK_HIGH)
+    else:
+        risk_pct = config.ACCOUNT_RISK_HIGH if high_conf else config.ACCOUNT_RISK_BASE
+
     risk_usdt = usdt * (risk_pct / 100)
     risk_usdt = min(risk_usdt, config.MAX_TRADE_USDT * (risk_pct / 100))
 
@@ -118,7 +131,7 @@ def _place_stop_loss_order(client, pos: pm.Position, info: dict) -> str:
     return str(order["orderId"])
 
 
-def open_long(signal: Signal) -> pm.Position:
+def open_long(signal: Signal, kelly_risk_pct: float = 0) -> pm.Position:
     """
     Öffnet Long-Position:
     1. Market BUY (volle Qty)
@@ -128,7 +141,7 @@ def open_long(signal: Signal) -> pm.Position:
     client = get_client()
     info   = get_symbol_info(signal.symbol)
     high   = signal.confidence == "HIGH"
-    qty    = _calc_qty(signal.symbol, signal.entry, signal.stop_loss, high)
+    qty    = _calc_qty(signal.symbol, signal.entry, signal.stop_loss, high, kelly_risk_pct)
 
     # Market Buy
     buy = client.order_market_buy(symbol=signal.symbol, quantity=qty)
@@ -177,15 +190,29 @@ def open_long(signal: Signal) -> pm.Position:
 
 def update_trailing_stop(pos: pm.Position, current_price: float) -> pm.Position:
     """
-    Zieht den Trailing-Stop nach, wenn der Preis steigt.
-    Neuer SL = Preis - (ATR * TRAIL_MULTIPLIER)
-    Nach TP1: Server-Side SL-Order wird mitgezogen (nur bei >= 0.1% Differenz).
+    Enhanced Trailing-Stop:
+    - Vor TP1: Trailing erst aktiv nach TRAIL_ACTIVATION_RR erreicht
+    - Step-basiert: SL bewegt sich nur in TRAIL_STEP_PCT-Stufen (weniger Whipsaw)
+    - Nach TP1: Server-Side SL-Order wird mitgezogen
     """
     if not pos.active or pos.side != "BUY":
         return pos
 
+    # Vor TP1: Trailing erst aktivieren wenn mindestens X:1 R:R im Plus
+    if not pos.tp1_hit:
+        sl_dist = pos.entry_price - pos.stop_loss
+        current_rr = (current_price - pos.entry_price) / sl_dist if sl_dist > 0 else 0
+        if current_rr < config.TRAIL_ACTIVATION_RR:
+            return pos
+
     new_trail = current_price - (pos.atr * config.TRAIL_ATR_MULTIPLIER)
+
     if new_trail > pos.trailing_sl:
+        # Step-basiert: nur nachziehen wenn Differenz >= TRAIL_STEP_PCT
+        step_threshold = pos.trailing_sl * (1 + config.TRAIL_STEP_PCT / 100)
+        if new_trail < step_threshold:
+            return pos
+
         old_trail = pos.trailing_sl
         pos.trailing_sl = round(new_trail, 2)
 
@@ -213,6 +240,35 @@ def check_and_handle_exits(pos: pm.Position, current_price: float) -> tuple[pm.P
     """
     client = get_client()
     info   = get_symbol_info(pos.symbol)
+
+    # ── Zeitbasierte Exits ─────────────────────────────────────
+    if pos.opened_at:
+        try:
+            opened = datetime.fromisoformat(pos.opened_at)
+            hours_open = (datetime.now(timezone.utc) - opened).total_seconds() / 3600
+
+            # Stale Trade: zu lange offen → Force-Close
+            if hours_open >= config.STALE_TRADE_HOURS:
+                _cancel_oco(client, pos.symbol, pos.oco_order_id)
+                _cancel_order(client, pos.symbol, pos.trailing_order_id)
+                _market_sell_remaining(client, pos, info)
+                pnl = (current_price - pos.entry_price) * pos.quantity_remaining
+                pos.pnl_realized += pnl
+                pm.remove(pos.symbol)
+                return pos, f"TIME_EXIT ({hours_open:.0f}h) | Force-Close | P&L={pnl:+.2f} USDT"
+
+            # TP1 nicht erreicht nach MAX_TRADE_HOURS → Breakeven-Exit
+            if not pos.tp1_hit and hours_open >= config.MAX_TRADE_HOURS:
+                if current_price >= pos.entry_price:
+                    _cancel_oco(client, pos.symbol, pos.oco_order_id)
+                    _cancel_order(client, pos.symbol, pos.trailing_order_id)
+                    _market_sell_remaining(client, pos, info)
+                    pnl = (current_price - pos.entry_price) * pos.quantity_remaining
+                    pos.pnl_realized += pnl
+                    pm.remove(pos.symbol)
+                    return pos, f"TIME_EXIT ({hours_open:.0f}h) | Breakeven | P&L={pnl:+.2f} USDT"
+        except (ValueError, TypeError):
+            pass
 
     # ── OCO-Status bei Binance prüfen (Race-Condition-Schutz) ─
     if not pos.tp1_hit and pos.oco_order_id:

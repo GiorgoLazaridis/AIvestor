@@ -187,26 +187,40 @@ def generate_signal(symbol: str, dfs: dict) -> Signal:
             reason=f"Score {dominant}/12 — Minimum {config.MIN_SCORE} nicht erreicht"
         )
 
+    # ── Adaptive SL/TP basierend auf Volatilitäts-Regime ────
+    sl_mult = config.SL_ATR_MULTIPLIER
+    if config.ADAPTIVE_SLTP and len(df15) >= config.VOL_LOOKBACK:
+        recent_atr = df15["atr"].tail(config.VOL_LOOKBACK)
+        atr_mean = recent_atr.mean()
+        atr_std = recent_atr.std()
+        if atr_std > 0 and atr_mean > 0:
+            # Volatility z-score: >1 = sehr volatil, <-1 = sehr ruhig
+            vol_z = (atr - atr_mean) / atr_std
+            # Im ruhigen Markt engeren SL, im volatilen weiteren
+            sl_mult = config.SL_ATR_MULTIPLIER + vol_z * 0.3
+            sl_mult = max(config.SL_ATR_MIN, min(sl_mult, config.SL_ATR_MAX))
+
     # SL/TP berechnen
-    if action == "BUY":
-        sl  = price - atr * config.SL_ATR_MULTIPLIER
-        tp1 = price + atr * config.SL_ATR_MULTIPLIER * config.TP1_RR
-        tp2 = price + atr * config.SL_ATR_MULTIPLIER * config.TP2_RR
-    else:
-        sl  = price + atr * config.SL_ATR_MULTIPLIER
-        tp1 = price - atr * config.SL_ATR_MULTIPLIER * config.TP1_RR
-        tp2 = price - atr * config.SL_ATR_MULTIPLIER * config.TP2_RR
+    sl  = price - atr * sl_mult
+    tp1 = price + atr * sl_mult * config.TP1_RR
+    tp2 = price + atr * sl_mult * config.TP2_RR
 
     sl_dist = abs(price - sl)
     tp1_dist = abs(tp1 - price)
     crv = tp1_dist / sl_dist if sl_dist > 0 else 0
 
-    if crv < config.MIN_CRV:
+    # Fee-Aware CRV: Fees von der Gewinnseite abziehen
+    fee_cost_pct = config.TRADING_FEE_PCT * 2  # 1x Entry + 1x Exit = Round-Trip
+    fee_usdt = price * (fee_cost_pct / 100)
+    net_tp1_dist = tp1_dist - fee_usdt
+    net_crv = net_tp1_dist / sl_dist if sl_dist > 0 else 0
+
+    if net_crv < config.MIN_NET_CRV:
         return Signal(
             action="NO TRADE", symbol=symbol, score=score,
-            entry=price, stop_loss=round(sl,2),
+            entry=price, stop_loss=round(sl, 2),
             scored_signals=scored,
-            reason=f"CRV {crv:.2f} unter Minimum {config.MIN_CRV}"
+            reason=f"Netto-CRV {net_crv:.2f} unter Minimum {config.MIN_NET_CRV} (Fees: {fee_cost_pct:.2f}%)"
         )
 
     confidence = "HIGH" if score >= config.HIGH_CONF_SCORE else "NORMAL"
@@ -223,5 +237,5 @@ def generate_signal(symbol: str, dfs: dict) -> Signal:
         crv=round(crv, 2),
         atr=round(atr, 2),
         scored_signals=scored,
-        reason=f"Score {score}/12 ({confidence}) | CRV {crv:.1f}:1 | ATR={atr:.2f}"
+        reason=f"Score {score}/12 ({confidence}) | CRV {crv:.1f}:1 (netto {net_crv:.1f}:1) | ATR={atr:.2f} | SL×{sl_mult:.1f}"
     )

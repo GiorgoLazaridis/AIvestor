@@ -58,5 +58,44 @@ TP1_RR               = 2.0   # Erste TP bei 2:1 → 50% schließen
 TP2_RR               = 4.0   # Zweite TP bei 4:1 → Rest schließen
 MIN_CRV              = 2.0
 
+# ── Drawdown-Limits (Circuit Breaker) ──────────────────────
+MAX_DAILY_DRAWDOWN_PCT  = float(os.getenv("MAX_DAILY_DRAWDOWN", 3.0))
+MAX_WEEKLY_DRAWDOWN_PCT = float(os.getenv("MAX_WEEKLY_DRAWDOWN", 6.0))
+
+# ── Kelly-Positionsgröße ────────────────────────────────────
+USE_KELLY_SIZING     = True        # Kelly statt fixem Risk%
+KELLY_FRACTION       = 0.25        # 25% Kelly (konservativ)
+KELLY_MIN_TRADES     = 20          # Mindest-Trades bevor Kelly aktiv wird
+KELLY_FALLBACK_PCT   = 1.0         # Fallback-Risk% bis genug Daten
+
+# ── Zeitbasierte Exits ──────────────────────────────────────
+MAX_TRADE_HOURS      = 24          # TP1 nicht erreicht → Breakeven-Exit
+STALE_TRADE_HOURS    = 48          # Force-Close nach 48h (Kapital binden)
+
+# ── Adaptive SL/TP ──────────────────────────────────────────
+ADAPTIVE_SLTP        = True        # SL/TP an Volatilität anpassen
+SL_ATR_MIN           = 1.0         # Minimum SL in ATR (ruhiger Markt)
+SL_ATR_MAX           = 2.5         # Maximum SL in ATR (volatiler Markt)
+VOL_LOOKBACK         = 20          # Perioden für Volatilitäts-Berechnung
+
+# ── Enhanced Trailing Stop ───────────────────────────────────
+TRAIL_STEP_PCT       = 0.3         # SL in 0.3%-Stufen nachziehen (weniger Whipsaw)
+TRAIL_ACTIVATION_RR  = 1.0         # Trailing erst nach 1:1 R:R aktivieren
+
+# ── Fees ─────────────────────────────────────────────────────
+TRADING_FEE_PCT      = 0.10        # Binance Maker/Taker Fee in %
+MIN_NET_CRV          = 2.0         # Mindest-CRV NACH Abzug der Fees
+
+# ── Pyramiding (Gewinner aufstocken) ─────────────────────────
+PYRAMIDING_ENABLED   = False       # Vorsichtig — erst nach Backtest aktivieren
+PYRAMID_MAX_ADDS     = 1           # Max. 1x Nachkauf pro Position
+PYRAMID_TRIGGER_RR   = 1.5         # Nachkauf bei 1.5:1 R:R im Plus
+
 # ── Loop ─────────────────────────────────────────────────────
 LOOP_INTERVAL_SECONDS = 60
+
+# ── Backtest ─────────────────────────────────────────────────
+BACKTEST_START        = "2024-06-01"   # Startdatum für Backtest
+BACKTEST_INITIAL_USDT = 1000.0         # Start-Kapital
+BACKTEST_SLIPPAGE_PCT = 0.05           # Simulierter Slippage in %
+BACKTEST_DATA_DIR     = "backtest_data" # Cache-Ordner für historische Daten

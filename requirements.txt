@@ -5,3 +5,4 @@ python-binance==1.0.35
 colorama==0.4.6
 python-dotenv==1.2.2
 pytest==8.3.5
+pyarrow==19.0.1

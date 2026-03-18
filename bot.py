@@ -17,6 +17,9 @@ import config
 import position_manager as pm
 import order_executor as executor
 import market_regime as regime_detector
+import risk_manager as rm
+import performance as perf
+from exchange import get_balance_usdt
 from data_fetcher import fetch_all_timeframes, fetch_current_price
 from indicators import calculate_all
 from signal_engine import generate_signal
@@ -43,18 +46,23 @@ def _group_already_open(group: str) -> bool:
     return False
 
 
-def _header(regime):
+def _header(regime, risk_state):
     mode = f"{Fore.RED}LIVE{Style.RESET_ALL}" if not config.TESTNET else f"{Fore.YELLOW}TESTNET{Style.RESET_ALL}"
     ts   = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
     regime_color = Fore.GREEN if regime.regime == "BULL" else (
                    Fore.RED   if regime.regime == "BEAR" else Fore.YELLOW)
 
+    stats = rm.get_trade_stats(risk_state)
+    daily_c = Fore.GREEN if risk_state.daily_pnl_usdt >= 0 else Fore.RED
+
     print(f"\n{Fore.CYAN}{'='*65}")
     print(f"  TRADING BOT | {mode} | {ts} UTC")
     print(f"  Markt-Regime: {regime_color}{regime.regime}{Style.RESET_ALL} | {regime.detail}")
     print(f"  BTC: ${regime.btc_price:,.2f} | RSI: {regime.btc_rsi}")
     print(f"  Offene Positionen: {pm.count_active()}/{config.MAX_OPEN_POSITIONS}")
+    print(f"  Tages-P&L: {daily_c}{risk_state.daily_pnl_usdt:+.2f} USDT{Style.RESET_ALL}"
+          f" | Win-Rate: {stats['win_rate']}% | Kelly-Risk: {stats['kelly_risk_pct']}%")
     print(f"{'='*65}{Style.RESET_ALL}")
 
 
@@ -100,19 +108,38 @@ def run():
         print(f"  Gruppen: A={config.SYMBOL_GROUPS['A']} | B={config.SYMBOL_GROUPS['B']} | C={config.SYMBOL_GROUPS['C']}")
         print(f"  Strategie: MTF (4H+1H+15m) | Min-Score: {config.MIN_SCORE}/12")
         print(f"  Max Positionen: {config.MAX_OPEN_POSITIONS} (max {config.MAX_PER_GROUP} pro Gruppe)")
+        print(f"  Risk: Kelly={config.USE_KELLY_SIZING} | DD-Limit: {config.MAX_DAILY_DRAWDOWN_PCT}%/Tag")
         print(f"{'*'*65}{Style.RESET_ALL}\n")
     else:
         print(f"\n{Fore.RED}{'!'*65}")
         print(f"  LIVE-MODUS | ECHTES GELD | Max ${config.MAX_TRADE_USDT}/Trade")
+        print(f"  DD-Limit: {config.MAX_DAILY_DRAWDOWN_PCT}%/Tag | {config.MAX_WEEKLY_DRAWDOWN_PCT}%/Woche")
         print(f"{'!'*65}{Style.RESET_ALL}\n")
 
     print("  Bot läuft. Strg+C zum Beenden.\n")
 
+    # Tracking-Variablen für Performance-Report
+    cycle_trades_opened = 0
+    cycle_trades_closed = 0
+    cycle_wins = 0
+    cycle_losses = 0
+    last_report_date = ""
+
     while True:
         try:
+            # ── Risk Manager: State laden & Resets ──────────────
+            balance = get_balance_usdt()
+            risk_state = rm.load_state()
+            risk_state = rm.check_and_reset(risk_state, balance)
+
             # ── Markt-Regime prüfen ───────────────────────────────
             regime = regime_detector.detect()
-            _header(regime)
+            _header(regime, risk_state)
+
+            # ── Circuit Breaker Check ─────────────────────────────
+            can_trade, reason = rm.can_trade(risk_state, balance)
+            if not can_trade:
+                print(f"\n  {Fore.RED}CIRCUIT BREAKER: {reason}{Style.RESET_ALL}")
 
             # ── Offene Positionen verwalten ───────────────────────
             all_pos = pm.load_all()
@@ -127,6 +154,15 @@ def run():
                     if event:
                         print(f"\n  {Fore.MAGENTA}[EXIT] {symbol}: {event}{Style.RESET_ALL}")
                         log_event(symbol, "EXIT", event)
+
+                        # P&L an Risk Manager melden
+                        entry_value = pos.entry_price * pos.quantity
+                        rm.record_trade(risk_state, symbol, pos.pnl_realized, entry_value)
+                        cycle_trades_closed += 1
+                        if pos.pnl_realized > 0:
+                            cycle_wins += 1
+                        else:
+                            cycle_losses += 1
                     else:
                         _print_position(pos, price)
 
@@ -135,12 +171,16 @@ def run():
 
             # ── Neue Signale suchen ───────────────────────────────
             open_count = pm.count_active()
-            if open_count >= config.MAX_OPEN_POSITIONS:
+            if not can_trade:
+                pass  # Circuit Breaker — keine neuen Trades
+            elif open_count >= config.MAX_OPEN_POSITIONS:
                 print(f"\n  {Fore.YELLOW}Max. Positionen ({open_count}/{config.MAX_OPEN_POSITIONS}) — kein neuer Entry.{Style.RESET_ALL}")
             elif not regime.allow_longs and not regime.allow_shorts:
                 print(f"\n  {Fore.YELLOW}Markt-Regime NEUTRAL — kein Trade.{Style.RESET_ALL}")
             else:
-                print(f"\n  Analysiere {len(config.SYMBOLS)} Symbole...")
+                # Kelly-Risk% berechnen
+                kelly_pct = rm.calc_kelly_risk_pct(risk_state)
+                print(f"\n  Analysiere {len(config.SYMBOLS)} Symbole... (Risk: {kelly_pct}%)")
 
                 for symbol in config.SYMBOLS:
                     if pm.load(symbol).active:
@@ -171,15 +211,13 @@ def run():
 
                         if signal.action == "BUY" and not skip:
                             print(f"\n  {Fore.GREEN}Öffne Long: {symbol}...{Style.RESET_ALL}")
-                            pos = executor.open_long(signal)
+                            pos = executor.open_long(signal, kelly_risk_pct=kelly_pct)
                             msg = (f"Entry ${pos.entry_price:,.4f} | Qty {pos.quantity} | "
                                    f"SL ${pos.stop_loss:,.4f} | TP1 ${pos.take_profit1:,.4f} | "
                                    f"TP2 ${pos.take_profit2:,.4f}")
                             print(f"  {Fore.GREEN}[OK] {msg}{Style.RESET_ALL}")
                             log_event(symbol, "OPEN_LONG", msg)
-
-                        elif signal.action == "SELL" and not skip:
-                            print(f"  {Fore.YELLOW}{symbol}: SELL erkannt — Spot-only, kein Short.{Style.RESET_ALL}")
+                            cycle_trades_opened += 1
 
                     except BinanceAPIException as e:
                         print(f"  {Fore.RED}Binance API: {e.message}{Style.RESET_ALL}")
@@ -188,7 +226,25 @@ def run():
                     except Exception as e:
                         print(f"  {Fore.RED}{symbol} Fehler: {e}{Style.RESET_ALL}")
 
+            # ── Täglicher Performance-Report ──────────────────────
+            today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            if last_report_date and last_report_date != today:
+                end_balance = get_balance_usdt()
+                perf.record_day(
+                    risk_state.starting_balance, end_balance,
+                    cycle_trades_opened, cycle_trades_closed,
+                    cycle_wins, cycle_losses,
+                )
+                perf.print_report()
+                cycle_trades_opened = cycle_trades_closed = cycle_wins = cycle_losses = 0
+            last_report_date = today
+
         except KeyboardInterrupt:
+            # Performance-Report beim Beenden
+            try:
+                perf.print_report()
+            except Exception:
+                pass
             print(f"\n{Fore.YELLOW}Bot gestoppt.{Style.RESET_ALL}")
             sys.exit(0)
         except Exception as e:

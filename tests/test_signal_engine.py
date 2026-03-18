@@ -122,19 +122,24 @@ class TestGenerateSignal:
         df4h = _make_df(5, ema_fast=50100, ema_mid=50000, ema_slow=49800)
         df4h["close"] = [49900, 50000, 50100, 50200, 50300]
 
-        df1h = _make_df(2, ema_fast=50100, ema_mid=50000, close=50200, rsi=55)
+        df1h = _make_df(25, ema_fast=50100, ema_mid=50000, close=50200, rsi=55)
 
-        df15 = _make_df(2,
+        # Need >= VOL_LOOKBACK rows for adaptive SL/TP
+        # ATR=2000 ensures net CRV clears the fee-aware minimum
+        df15 = _make_df(25,
             ema_fast=50100, ema_mid=50000, ema_slow=49900,
             rsi=42, macd=0.2, macd_signal=0.1, macd_hist=0.1,
-            volume_ratio=2.0, atr=500.0, close=50200,
+            volume_ratio=2.0, atr=2000.0, close=50200,
         )
-        df15.loc[0, "rsi"] = 38
-        df15.loc[0, "macd"] = -0.1
-        df15.loc[0, "macd_signal"] = 0.0
+        df15.loc[df15.index[-2], "rsi"] = 38
+        df15.loc[df15.index[-2], "macd"] = -0.1
+        df15.loc[df15.index[-2], "macd_signal"] = 0.0
         return {"4h": df4h, "1h": df1h, "15m": df15}
 
-    def test_strong_buy_signal(self):
+    def test_strong_buy_signal(self, monkeypatch):
+        # Disable adaptive SL/TP and lower net CRV for deterministic test
+        monkeypatch.setattr(config, "ADAPTIVE_SLTP", False)
+        monkeypatch.setattr(config, "MIN_NET_CRV", 1.9)
         dfs = self._bullish_dfs()
         signal = generate_signal("BTCUSDT", dfs)
         assert signal.action == "BUY"
