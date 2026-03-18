@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 
 
 LOG_FILE = "trades_log.json"
+MAX_LOG_ENTRIES = 10_000
 
 
 def _load() -> list:
@@ -17,6 +18,9 @@ def _load() -> list:
 
 
 def _save(logs: list) -> None:
+    # Rotate: keep only the most recent entries
+    if len(logs) > MAX_LOG_ENTRIES:
+        logs = logs[-MAX_LOG_ENTRIES:]
     with open(LOG_FILE, "w", encoding="utf-8") as f:
         json.dump(logs, f, indent=2, ensure_ascii=False)
 

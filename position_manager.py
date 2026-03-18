@@ -4,6 +4,7 @@ Unterstützt jetzt Multi-Symbol und Partial-TP.
 """
 import json
 import os
+import tempfile
 from dataclasses import dataclass, asdict, field
 from typing import Optional
 
@@ -46,8 +47,17 @@ def load_all() -> dict[str, Position]:
 
 
 def save_all(positions: dict[str, Position]) -> None:
-    with open(POSITIONS_FILE, "w") as f:
-        json.dump({k: asdict(v) for k, v in positions.items()}, f, indent=2)
+    # Atomic write: write to temp file, then rename
+    dir_name = os.path.dirname(os.path.abspath(POSITIONS_FILE))
+    fd, tmp_path = tempfile.mkstemp(dir=dir_name, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump({k: asdict(v) for k, v in positions.items()}, f, indent=2)
+        os.replace(tmp_path, POSITIONS_FILE)
+    except Exception:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        raise
 
 
 def load(symbol: str) -> Position:

@@ -169,13 +169,16 @@ def generate_signal(symbol: str, dfs: dict) -> Signal:
         else:
             scored.append(f" 0    | {desc}")
 
-    # Richtung bestimmen
+    # Richtung bestimmen (Spot-only: SELL-Signale werden als NO TRADE behandelt)
     if buy_score >= config.MIN_SCORE and buy_score > sell_score:
         action = "BUY"
         score  = buy_score
     elif sell_score >= config.MIN_SCORE and sell_score > buy_score:
-        action = "SELL"
-        score  = sell_score
+        return Signal(
+            action="NO TRADE", symbol=symbol, score=sell_score,
+            scored_signals=scored,
+            reason=f"SELL-Signal (Score {sell_score}/12) — Spot-only, kein Short möglich"
+        )
     else:
         dominant = max(buy_score, sell_score)
         return Signal(
