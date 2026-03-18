@@ -50,6 +50,8 @@ AIvestor ist ein vollautomatischer Trading-Bot für Binance, der auf einem regel
 | **Partial Take-Profit** | TP1 bei 2:1 schließt 50%, TP2 bei 4:1 schließt Rest |
 | **Trailing Stop-Loss** | SL zieht automatisch mit dem Preis mit |
 | **Breakeven** | Nach TP1 wird SL auf Einstiegspreis gesetzt |
+| **Server-Side Stop-Loss** | Nach TP1: SL-Order direkt bei Binance (Flash-Crash-Schutz) |
+| **OCO-Schutz** | Race-Condition-sichere OCO-Verwaltung, kein doppelter Verkauf |
 | **Dynamische Positionsgröße** | Normal 1%, High-Confidence 1.5% Risiko |
 | **Trade-Log** | Jede Entscheidung wird in `trades_log.json` dokumentiert |
 | **Testnet-Modus** | Vollständiges Testen ohne echtes Geld |
@@ -193,6 +195,7 @@ pip install -r requirements.txt
 | `requests` | HTTP-Anfragen |
 | `colorama` | Farbige Terminal-Ausgabe |
 | `python-dotenv` | Umgebungsvariablen aus `.env` |
+| `pytest` | Unit-Tests (Entwicklung) |
 
 ### Schritt 3: Umgebungsvariablen konfigurieren
 
@@ -394,6 +397,8 @@ Bei jedem neuen Preishoch:
 
 Nach TP1:
   SL = Entry-Preis (Breakeven)
+  → Server-Side SL-Order bei Binance platziert
+  → Trailing Stop zieht SL-Order automatisch nach (≥ 0.1%)
   → Ab hier kein Verlust mehr möglich
 ```
 
@@ -405,7 +410,8 @@ Nach TP1:
 | 3 Losing Trades | -3% des Kontos |
 | 10 Losing Trades in Folge | -10% des Kontos |
 | TP1 erreicht, dann SL | 0% Verlust (Breakeven) |
-| Flash Crash | Slippage möglich, SL nicht garantiert |
+| Flash Crash vor TP1 | OCO-Order greift bei Binance, Slippage möglich |
+| Flash Crash nach TP1 | Server-Side SL-Order greift, kein Polling nötig |
 
 ---
 
@@ -478,17 +484,22 @@ AIvestor/
 ├── market_regime.py      # BTC-Regime Erkennung
 ├── indicators.py         # EMA, RSI, MACD, ATR Berechnung
 │
-├── data_fetcher.py       # Binance Marktdaten (kein API Key nötig)
+├── data_fetcher.py       # Binance Marktdaten (parallel, kein API Key nötig)
 ├── exchange.py           # Binance Order-Ausführung (API Key nötig)
-├── order_executor.py     # Long-Entry, Trailing-SL, Partial-TP
-├── position_manager.py   # Positions-Tracking (positions.json)
+├── order_executor.py     # Long-Entry, Trailing-SL, Partial-TP, OCO-Management
+├── position_manager.py   # Positions-Tracking (positions.json, atomare Writes)
 │
 ├── logger.py             # Trade-Dokumentation (trades_log.json)
 │
-├── main.py               # Legacy Entry-Point
+├── main.py               # Legacy Entry-Point (→ bot.py)
 ├── requirements.txt      # Python-Abhängigkeiten
 ├── .env.example          # Vorlage für API Keys
-└── .gitignore            # Schützt .env und Logs vor Git
+├── .gitignore            # Schützt .env und Logs vor Git
+│
+└── tests/                # Unit-Tests
+    ├── conftest.py
+    ├── test_signal_engine.py
+    └── test_position_manager.py
 ```
 
 ### Automatisch erstellte Dateien (nicht in Git)
@@ -521,10 +532,18 @@ Woche 3–4:  Live mit $50–100 — erste echte Erfahrungen
 Monat 2+:   Live mit $500–1.000 — wenn Testnet profitabel war
 ```
 
+### Tests
+
+```bash
+python -m pytest tests/ -v
+```
+
+26 Tests für Signal-Engine (Score-Berechnung, Signal-Generierung) und Position-Manager (CRUD, Datenintegrität).
+
 ### Was den Bot limitiert
 
 - Handelt nur **Spot** (kein Futures, kein Hebel)
-- Nur **Long-Positionen** (kein Short-Selling im Spot)
+- Nur **Long-Positionen** — SELL-Signale werden erkannt, aber als NO TRADE behandelt
 - Keine Nachrichten-Auswertung
 - Kein Backtesting eingebaut (empfohlen vor Live-Start)
 
