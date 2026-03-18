@@ -1,5 +1,6 @@
 import requests
 import pandas as pd
+from concurrent.futures import ThreadPoolExecutor
 import config
 
 BINANCE_BASE = "https://testnet.binance.vision" if config.TESTNET else "https://api.binance.com"
@@ -26,9 +27,12 @@ def fetch_current_price(symbol: str) -> float:
 
 
 def fetch_all_timeframes(symbol: str) -> dict:
-    """Holt 4H, 1H und 15m gleichzeitig für ein Symbol."""
-    return {
-        "4h":  fetch_klines(symbol, config.TF_TREND),
-        "1h":  fetch_klines(symbol, config.TF_STRUCT),
-        "15m": fetch_klines(symbol, config.TF_ENTRY),
-    }
+    """Holt 4H, 1H und 15m parallel für ein Symbol."""
+    timeframes = [
+        ("4h",  config.TF_TREND),
+        ("1h",  config.TF_STRUCT),
+        ("15m", config.TF_ENTRY),
+    ]
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        futures = {tf: pool.submit(fetch_klines, symbol, interval) for tf, interval in timeframes}
+        return {tf: fut.result() for tf, fut in futures.items()}
