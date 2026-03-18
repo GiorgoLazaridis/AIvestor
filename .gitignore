@@ -6,3 +6,7 @@ __pycache__/
 *.pyc
 *.pyo
 .claude/
+backtest_data/
+backtest_result.json
+risk_state.json
+performance.json

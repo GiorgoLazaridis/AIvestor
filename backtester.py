@@ -29,7 +29,7 @@ from indicators import calculate_all
 from signal_engine import generate_signal
 
 
-# ── Daten-Download ──────────────────────────────────────────
+# -- Daten-Download ------------------------------------------
 
 def _download_klines(symbol: str, interval: str, start_ms: int, end_ms: int) -> list:
     """Holt Klines direkt von Binance Public API (kein API Key nötig)."""
@@ -75,7 +75,7 @@ def load_data(symbol: str, interval: str, start_date: str, end_date: str) -> pd.
     if os.path.exists(cache_file):
         return pd.read_parquet(cache_file)
 
-    print(f"  Downloading {symbol} {interval} ({start_date} → {end_date})...")
+    print(f"  Downloading {symbol} {interval} ({start_date} ->{end_date})...")
     start_ms = int(datetime.strptime(start_date, "%Y-%m-%d").replace(
         tzinfo=timezone.utc).timestamp() * 1000)
     end_ms = int(datetime.strptime(end_date, "%Y-%m-%d").replace(
@@ -87,7 +87,7 @@ def load_data(symbol: str, interval: str, start_date: str, end_date: str) -> pd.
     return df
 
 
-# ── Simulations-Engine ──────────────────────────────────────
+# -- Simulations-Engine --------------------------------------
 
 @dataclass
 class SimPosition:
@@ -156,7 +156,7 @@ def run_backtest(
     balance = initial_balance or config.BACKTEST_INITIAL_USDT
 
     print(f"\n{'='*60}")
-    print(f"  BACKTEST: {start} → {end}")
+    print(f"  BACKTEST: {start} ->{end}")
     print(f"  Symbole: {', '.join(symbols)}")
     print(f"  Startkapital: ${balance:,.2f}")
     print(f"  Fees: {config.TRADING_FEE_PCT}% | Slippage: {config.BACKTEST_SLIPPAGE_PCT}%")
@@ -182,10 +182,13 @@ def run_backtest(
     else:
         btc_4h = all_data["BTCUSDT"]["4h"]
 
-    # ── Walk-Forward Simulation ─────────────────────────────
+    # -- Walk-Forward Simulation -----------------------------
     # Iteriere über 15m-Kerzen ab Startdatum
     entry_df = all_data[symbols[0]][config.TF_ENTRY]
-    start_ts = pd.Timestamp(start, tz="UTC")
+    # Match timezone awareness of the index
+    start_ts = pd.Timestamp(start)
+    if entry_df.index.tz is not None:
+        start_ts = start_ts.tz_localize(entry_df.index.tz)
     sim_times = entry_df.loc[entry_df.index >= start_ts].index
 
     positions: dict[str, SimPosition] = {}
@@ -205,7 +208,7 @@ def run_backtest(
     for ts in sim_times:
         candle_count += 1
 
-        # ── Offene Positionen managen (jede Kerze) ─────────
+        # -- Offene Positionen managen (jede Kerze) ---------
         for sym in list(positions.keys()):
             pos = positions[sym]
             sym_data = all_data.get(sym, {}).get(config.TF_ENTRY)
@@ -322,7 +325,7 @@ def run_backtest(
             except (ValueError, TypeError):
                 pass
 
-        # ── Neue Signale (alle check_interval Kerzen) ──────
+        # -- Neue Signale (alle check_interval Kerzen) ------
         if candle_count % check_interval != 0:
             # Equity-Curve trotzdem tracken
             open_pnl = sum(
@@ -435,7 +438,7 @@ def run_backtest(
         dd = (peak_equity - (equity + open_pnl)) / peak_equity * 100 if peak_equity > 0 else 0
         max_dd = max(max_dd, dd)
 
-    # ── Offene Positionen am Ende schließen ─────────────────
+    # -- Offene Positionen am Ende schließen -----------------
     for sym, pos in list(positions.items()):
         sym_data = all_data.get(sym, {}).get(config.TF_ENTRY)
         if sym_data is not None and len(sym_data) > 0:
@@ -455,7 +458,7 @@ def run_backtest(
                 "entry_time": pos.entry_time, "exit_time": str(sim_times[-1]),
             })
 
-    # ── Metriken berechnen ──────────────────────────────────
+    # -- Metriken berechnen ----------------------------------
     total_trades = len(trades_log)
     wins = [t for t in trades_log if t["pnl_usdt"] > 0]
     losses = [t for t in trades_log if t["pnl_usdt"] <= 0]
@@ -533,7 +536,7 @@ def print_result(result: BacktestResult) -> None:
     print(f"  Gesamt-Return:    {r.total_return_pct:+.2f}%")
     print(f"  Monatl. Schnitt:  {r.monthly_avg_pct:+.2f}%")
     print(f"  Max Drawdown:     {r.max_drawdown_pct:.2f}%")
-    print(f"{'─'*60}")
+    print(f"{'-'*60}")
     print(f"  Trades:           {r.total_trades}")
     print(f"  Gewinner:         {r.wins} ({r.win_rate}%)")
     print(f"  Verlierer:        {r.losses}")

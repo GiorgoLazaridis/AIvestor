@@ -84,7 +84,7 @@ TRAIL_ACTIVATION_RR  = 1.0         # Trailing erst nach 1:1 R:R aktivieren
 
 # ── Fees ─────────────────────────────────────────────────────
 TRADING_FEE_PCT      = 0.10        # Binance Maker/Taker Fee in %
-MIN_NET_CRV          = 2.0         # Mindest-CRV NACH Abzug der Fees
+MIN_NET_CRV          = 1.8         # Mindest-CRV NACH Abzug der Fees
 
 # ── Pyramiding (Gewinner aufstocken) ─────────────────────────
 PYRAMIDING_ENABLED   = False       # Vorsichtig — erst nach Backtest aktivieren
