@@ -43,8 +43,8 @@ VOLUME_AVG_PERIOD = 20
 
 # ── Signal-Scoring ───────────────────────────────────────────
 # Jedes Signal hat Gewichtung 1–3. Mindest-Score zum Traden:
-MIN_SCORE         = 7   # von max. 12
-HIGH_CONF_SCORE   = 9   # "starkes" Signal → größere Position
+MIN_SCORE         = 8   # von max. 12 (optimiert via Backtest)
+HIGH_CONF_SCORE   = 10  # "starkes" Signal → größere Position
 
 # ── Risiko-Management ────────────────────────────────────────
 ACCOUNT_RISK_BASE    = float(os.getenv("ACCOUNT_RISK_PERCENT", 1.0))  # % bei normalem Signal
@@ -52,8 +52,8 @@ ACCOUNT_RISK_HIGH    = 1.5   # % bei high-confidence Signal
 MAX_TRADE_USDT       = float(os.getenv("MAX_TRADE_USDT", 100.0))
 MAX_OPEN_POSITIONS   = 3     # Max 3 gleichzeitig, aber nie 2 aus gleicher Gruppe
 MAX_PER_GROUP        = 1     # Korrelations-Schutz: max 1 Trade pro Gruppe
-SL_ATR_MULTIPLIER    = 1.5
-TRAIL_ATR_MULTIPLIER = 1.0   # Trailing Stop: 1x ATR hinter Preis
+SL_ATR_MULTIPLIER    = 1.0   # Engerer SL (optimiert via Backtest)
+TRAIL_ATR_MULTIPLIER = 1.5   # Trailing Stop: 1.5x ATR hinter Preis (optimiert)
 TP1_RR               = 2.0   # Erste TP bei 2:1 → 50% schließen
 TP2_RR               = 4.0   # Zweite TP bei 4:1 → Rest schließen
 MIN_CRV              = 2.0
@@ -69,8 +69,8 @@ KELLY_MIN_TRADES     = 20          # Mindest-Trades bevor Kelly aktiv wird
 KELLY_FALLBACK_PCT   = 1.0         # Fallback-Risk% bis genug Daten
 
 # ── Zeitbasierte Exits ──────────────────────────────────────
-MAX_TRADE_HOURS      = 24          # TP1 nicht erreicht → Breakeven-Exit
-STALE_TRADE_HOURS    = 48          # Force-Close nach 48h (Kapital binden)
+MAX_TRADE_HOURS      = 48          # TP1 nicht erreicht → Breakeven-Exit (optimiert)
+STALE_TRADE_HOURS    = 72          # Force-Close nach 72h (optimiert)
 
 # ── Adaptive SL/TP ──────────────────────────────────────────
 ADAPTIVE_SLTP        = True        # SL/TP an Volatilität anpassen
@@ -79,8 +79,8 @@ SL_ATR_MAX           = 2.5         # Maximum SL in ATR (volatiler Markt)
 VOL_LOOKBACK         = 20          # Perioden für Volatilitäts-Berechnung
 
 # ── Enhanced Trailing Stop ───────────────────────────────────
-TRAIL_STEP_PCT       = 0.3         # SL in 0.3%-Stufen nachziehen (weniger Whipsaw)
-TRAIL_ACTIVATION_RR  = 1.0         # Trailing erst nach 1:1 R:R aktivieren
+TRAIL_STEP_PCT       = 0.5         # SL in 0.5%-Stufen nachziehen (optimiert)
+TRAIL_ACTIVATION_RR  = 1.5         # Trailing erst nach 1.5:1 R:R aktivieren (optimiert)
 
 # ── Fees ─────────────────────────────────────────────────────
 TRADING_FEE_PCT      = 0.10        # Binance Maker/Taker Fee in %
