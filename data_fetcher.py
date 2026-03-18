@@ -2,7 +2,7 @@ import requests
 import pandas as pd
 import config
 
-BINANCE_BASE = "https://api.binance.com"
+BINANCE_BASE = "https://testnet.binance.vision" if config.TESTNET else "https://api.binance.com"
 
 
 def fetch_klines(symbol: str, interval: str, limit: int = config.CANDLES_LIMIT) -> pd.DataFrame:
