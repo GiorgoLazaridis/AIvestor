@@ -43,7 +43,6 @@ def _calc_qty(symbol: str, entry: float, stop_loss: float,
         risk_pct = config.ACCOUNT_RISK_HIGH if high_conf else config.ACCOUNT_RISK_BASE
 
     risk_usdt = usdt * (risk_pct / 100)
-    risk_usdt = min(risk_usdt, config.MAX_TRADE_USDT * (risk_pct / 100))
 
     sl_dist = abs(entry - stop_loss)
     if sl_dist == 0:
@@ -51,6 +50,10 @@ def _calc_qty(symbol: str, entry: float, stop_loss: float,
 
     info = get_symbol_info(symbol)
     qty = _round_step(risk_usdt / sl_dist, info["step_size"])
+
+    # Notional-Cap: Position darf MAX_TRADE_USDT nicht ueberschreiten
+    if qty * entry > config.MAX_TRADE_USDT:
+        qty = _round_step(config.MAX_TRADE_USDT / entry, info["step_size"])
 
     if qty * entry < info["min_notional"]:
         raise ValueError(f"Position zu klein: {qty} = ${qty*entry:.2f} (min ${info['min_notional']})")
@@ -182,7 +185,8 @@ def open_long(signal: Signal, kelly_risk_pct: float = 0) -> pm.Position:
         entry_order_id=order_id,
         score=signal.score,
         confidence=signal.confidence,
-        opened_at=datetime.now(timezone.utc).isoformat()
+        opened_at=datetime.now(timezone.utc).isoformat(),
+        highest_high=actual_entry,
     )
     pm.save(signal.symbol, pos)
     return pos
@@ -197,6 +201,11 @@ def update_trailing_stop(pos: pm.Position, current_price: float) -> pm.Position:
     """
     if not pos.active or pos.side != "BUY":
         return pos
+
+    # Track highest high (fuer Analyse, nicht fuer Trailing)
+    if pos.highest_high == 0:
+        pos.highest_high = current_price
+    pos.highest_high = max(pos.highest_high, current_price)
 
     # Vor TP1: Trailing erst aktivieren wenn mindestens X:1 R:R im Plus
     if not pos.tp1_hit:

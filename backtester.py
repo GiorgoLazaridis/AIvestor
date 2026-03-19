@@ -104,6 +104,7 @@ class SimPosition:
     pnl_realized: float = 0.0
     entry_time: str = ""
     score: int = 0
+    highest_high: float = 0.0
 
 
 @dataclass
@@ -220,6 +221,9 @@ def run_backtest(
             low = candle["low"]
             close = candle["close"]
 
+            # Chandelier Exit: Track highest high since entry
+            pos.highest_high = max(pos.highest_high, high)
+
             # Stop-Loss getriggert?
             if low <= pos.trailing_sl:
                 fill_price = _apply_slippage(pos.trailing_sl, "SELL")
@@ -272,7 +276,7 @@ def run_backtest(
                 del positions[sym]
                 continue
 
-            # Trailing Stop nachziehen
+            # Trailing Stop nachziehen (current price based, nicht Chandelier)
             if pos.tp1_hit or (pos.entry_price > 0 and
                     (close - pos.entry_price) / (pos.entry_price - pos.stop_loss) >= config.TRAIL_ACTIVATION_RR
                     if pos.entry_price != pos.stop_loss else False):
@@ -339,7 +343,7 @@ def run_backtest(
             max_dd = max(max_dd, dd)
             continue
 
-        # BTC-Regime
+        # BTC-Regime: nur in BULL traden (strenger Filter)
         btc_rows = btc_4h.loc[btc_4h.index <= ts]
         if len(btc_rows) < 5:
             continue
@@ -399,16 +403,20 @@ def run_backtest(
             if signal.action != "BUY":
                 continue
 
-            # Position eröffnen
+            # Position eroeffnen
             entry_price = _apply_slippage(signal.entry, "BUY")
             sl_dist = abs(entry_price - signal.stop_loss)
             if sl_dist == 0:
                 continue
 
             risk_usdt = equity * (config.ACCOUNT_RISK_BASE / 100)
-            risk_usdt = min(risk_usdt, config.MAX_TRADE_USDT * (config.ACCOUNT_RISK_BASE / 100))
             qty = risk_usdt / sl_dist
+
+            # Notional-Cap: Position darf MAX_TRADE_USDT nicht ueberschreiten
             notional = qty * entry_price
+            if notional > config.MAX_TRADE_USDT:
+                qty = config.MAX_TRADE_USDT / entry_price
+                notional = config.MAX_TRADE_USDT
 
             # Fee abziehen
             equity -= _apply_fee(notional)
@@ -425,6 +433,7 @@ def run_backtest(
                 atr=signal.atr,
                 entry_time=str(ts),
                 score=signal.score,
+                highest_high=entry_price,
             )
 
         # Equity Curve

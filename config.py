@@ -44,7 +44,7 @@ VOLUME_AVG_PERIOD = 20
 # ── Signal-Scoring ───────────────────────────────────────────
 # Jedes Signal hat Gewichtung 1–3. Mindest-Score zum Traden:
 MIN_SCORE         = 8   # von max. 14 (optimiert via Backtest)
-HIGH_CONF_SCORE   = 11  # "starkes" Signal → größere Position
+HIGH_CONF_SCORE   = 11  # "starkes" Signal -> groessere Position
 
 # ── Risiko-Management ────────────────────────────────────────
 ACCOUNT_RISK_BASE    = float(os.getenv("ACCOUNT_RISK_PERCENT", 1.0))  # % bei normalem Signal
@@ -52,7 +52,7 @@ ACCOUNT_RISK_HIGH    = 1.5   # % bei high-confidence Signal
 MAX_TRADE_USDT       = float(os.getenv("MAX_TRADE_USDT", 100.0))
 MAX_OPEN_POSITIONS   = 3     # Max 3 gleichzeitig, aber nie 2 aus gleicher Gruppe
 MAX_PER_GROUP        = 1     # Korrelations-Schutz: max 1 Trade pro Gruppe
-SL_ATR_MULTIPLIER    = 1.0   # Engerer SL (optimiert via Backtest)
+SL_ATR_MULTIPLIER    = 2.0   # Breiterer SL fuer aktuelle Volatilitaet (re-optimiert 2025-03)
 TRAIL_ATR_MULTIPLIER = 2.5   # Trailing Stop: 2.5x ATR hinter Preis (optimiert v2)
 TP1_RR               = 2.0   # Erste TP bei 2:1 → 50% schließen
 TP2_RR               = 4.0   # Zweite TP bei 4:1 → Rest schließen
@@ -78,9 +78,12 @@ SL_ATR_MIN           = 1.0         # Minimum SL in ATR (ruhiger Markt)
 SL_ATR_MAX           = 2.5         # Maximum SL in ATR (volatiler Markt)
 VOL_LOOKBACK         = 20          # Perioden für Volatilitäts-Berechnung
 
-# ── Enhanced Trailing Stop ───────────────────────────────────
+# ── Enhanced Trailing Stop (Chandelier Exit) ────────────────
 TRAIL_STEP_PCT       = 0.8         # SL in 0.8%-Stufen nachziehen (optimiert v2)
 TRAIL_ACTIVATION_RR  = 1.5         # Trailing erst nach 1.5:1 R:R aktivieren (optimiert)
+
+# ── Signal-Filter ───────────────────────────────────────────
+RSI_DIVERGENCE_FILTER = False      # Bearish RSI-Divergenz auf 1H blockiert Longs
 
 # ── Fees ─────────────────────────────────────────────────────
 TRADING_FEE_PCT      = 0.10        # Binance Maker/Taker Fee in %

@@ -154,6 +154,40 @@ def _score_volume(df15: pd.DataFrame) -> tuple[str | None, int, str]:
     return None, 0, f"Volume {ratio:.1f}x (zu gering)"
 
 
+def _check_rsi_divergence(df1h: pd.DataFrame) -> tuple[bool, str]:
+    """Prueft auf bearish RSI-Divergenz auf 1H-Chart.
+    Preis macht Higher-High aber RSI macht Lower-High = Trenderschoepfung.
+    Returns: (divergenz_gefunden, beschreibung)"""
+    data = df1h.tail(40)
+    if len(data) < 20 or "rsi" not in data.columns:
+        return False, ""
+
+    # Finde Swing-Highs im Preis (beidseitig bestaetigt, 2 Kerzen)
+    swing_highs = []
+    for i in range(2, len(data) - 2):
+        if (data.iloc[i]["high"] > data.iloc[i - 1]["high"] and
+            data.iloc[i]["high"] > data.iloc[i - 2]["high"] and
+            data.iloc[i]["high"] > data.iloc[i + 1]["high"] and
+            data.iloc[i]["high"] > data.iloc[i + 2]["high"]):
+            swing_highs.append(i)
+
+    if len(swing_highs) < 2:
+        return False, ""
+
+    prev_idx = swing_highs[-2]
+    curr_idx = swing_highs[-1]
+
+    price_hh = data.iloc[curr_idx]["high"] > data.iloc[prev_idx]["high"]
+    rsi_curr = data.iloc[curr_idx]["rsi"]
+    rsi_prev = data.iloc[prev_idx]["rsi"]
+    rsi_lh = rsi_curr < rsi_prev - 3  # Min 3 RSI-Punkte Unterschied
+
+    if price_hh and rsi_lh:
+        return True, (f"Bearish RSI-Divergenz: Preis HH aber RSI "
+                      f"{rsi_curr:.0f} < {rsi_prev:.0f}")
+    return False, ""
+
+
 def generate_signal(symbol: str, dfs: dict) -> Signal:
     """
     Hauptlogik: Alle Timeframes auswerten, Score berechnen, Trade entscheiden.
@@ -193,6 +227,18 @@ def generate_signal(symbol: str, dfs: dict) -> Signal:
             scored.append(f"+{pts} VOL  | {desc}")
         else:
             scored.append(f" 0    | {desc}")
+
+    # RSI-Divergenz-Filter: blockiert BUY bei bearish Divergenz auf 1H
+    if buy_score >= config.MIN_SCORE and buy_score > sell_score:
+        if getattr(config, "RSI_DIVERGENCE_FILTER", False):
+            div_found, div_reason = _check_rsi_divergence(df1h)
+            if div_found:
+                scored.append(f" X FILTER | {div_reason}")
+                return Signal(
+                    action="NO TRADE", symbol=symbol, score=buy_score,
+                    scored_signals=scored,
+                    reason=f"FILTER: {div_reason} -- Entry blockiert (Score war {buy_score}/14)"
+                )
 
     # Richtung bestimmen (Spot-only: SELL-Signale werden als NO TRADE behandelt)
     if buy_score >= config.MIN_SCORE and buy_score > sell_score:

@@ -1,16 +1,16 @@
 """
-Parameter-Optimizer: Testet systematisch verschiedene Konfigurationen
+Parameter-Optimizer v2: Testet systematisch verschiedene Konfigurationen
 und findet die profitabelste Kombination.
 
-Strategie: Mehrstufige Suche
-1. Grob: SL, TP1, TP2, MIN_SCORE
-2. Fein: Trailing, Timing
-3. Validierung: Bester Parameter-Satz auf vollem Zeitraum
+Strategie: Mehrstufige Suche mit Out-of-Sample-Validierung
+1. Grob: SL, TP1, TP2, MIN_SCORE (auf Train-Daten)
+2. Fein: Trailing, Timing (auf Train-Daten)
+3. OOS-Validierung: Bester Parameter-Satz auf ungesehenen Daten
 """
 import sys
 import time
 import itertools
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 import config
 from backtester import run_backtest
@@ -65,13 +65,30 @@ def _print_result(r: dict, rank: int = 0) -> None:
           f"Trail={p.get('TRAIL_ATR_MULTIPLIER','?')}")
 
 
-def optimize(symbols=None, start="2025-01-01", end=None, balance=1000.0):
+def optimize(symbols=None, start="2025-01-01", end=None, balance=1000.0, validate=True):
     symbols = symbols or config.SYMBOLS
     end = end or datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
+    # Out-of-Sample Split: 70% Train, 30% Test
+    start_dt = datetime.strptime(start, "%Y-%m-%d")
+    end_dt = datetime.strptime(end, "%Y-%m-%d")
+    total_days = (end_dt - start_dt).days
+
+    if validate and total_days > 60:
+        train_days = int(total_days * 0.7)
+        train_end = (start_dt + timedelta(days=train_days)).strftime("%Y-%m-%d")
+        test_start = train_end
+    else:
+        train_end = end
+        test_start = None
+        validate = False
+
     print(f"\n{'='*65}")
-    print(f"  OPTIMIZER: Parameter-Suche")
+    print(f"  OPTIMIZER v2: Parameter-Suche mit OOS-Validierung")
     print(f"  {start} -> {end} | {len(symbols)} Symbole | ${balance}")
+    if validate:
+        print(f"  Train: {start} -> {train_end} ({int(total_days * 0.7)} Tage)")
+        print(f"  Test:  {test_start} -> {end} ({total_days - int(total_days * 0.7)} Tage)")
     print(f"{'='*65}")
 
     # ── Phase 1: SL + Score Grobraster ──────────────────────
@@ -88,7 +105,7 @@ def optimize(symbols=None, start="2025-01-01", end=None, balance=1000.0):
         params = dict(zip(keys, vals))
         sys.stdout.write(f"\r  [{i+1}/{len(combos)}] SL={vals[0]}, Score={vals[1]}...")
         sys.stdout.flush()
-        r = _test_params(params, symbols, start, end, balance)
+        r = _test_params(params, symbols, start, train_end, balance)
         if "error" not in r:
             results.append(r)
 
@@ -121,7 +138,7 @@ def optimize(symbols=None, start="2025-01-01", end=None, balance=1000.0):
             continue
         sys.stdout.write(f"\r  [{i+1}/{len(combos2)}] TP1={vals[0]}, TP2={vals[1]}...")
         sys.stdout.flush()
-        r = _test_params(params, symbols, start, end, balance)
+        r = _test_params(params, symbols, start, train_end, balance)
         if "error" not in r:
             results2.append(r)
 
@@ -148,7 +165,7 @@ def optimize(symbols=None, start="2025-01-01", end=None, balance=1000.0):
         params = {**best2, **dict(zip(keys3, vals))}
         sys.stdout.write(f"\r  [{i+1}/{len(combos3)}] Trail={vals[0]}, Act={vals[1]}, Step={vals[2]}...")
         sys.stdout.flush()
-        r = _test_params(params, symbols, start, end, balance)
+        r = _test_params(params, symbols, start, train_end, balance)
         if "error" not in r:
             results3.append(r)
 
@@ -176,7 +193,7 @@ def optimize(symbols=None, start="2025-01-01", end=None, balance=1000.0):
             continue
         sys.stdout.write(f"\r  [{i+1}/{len(combos4)}] MaxH={vals[0]}, StaleH={vals[1]}...")
         sys.stdout.flush()
-        r = _test_params(params, symbols, start, end, balance)
+        r = _test_params(params, symbols, start, train_end, balance)
         if "error" not in r:
             results4.append(r)
 
@@ -192,14 +209,39 @@ def optimize(symbols=None, start="2025-01-01", end=None, balance=1000.0):
     all_valid.sort(key=lambda r: r["profit_factor"], reverse=True)
     best_final = all_valid[0] if all_valid else {"params": best3, "error": "Kein profitables Ergebnis"}
 
+    # ── Phase 5: Out-of-Sample Validierung ────────────────────
+    oos_result = None
+    if validate and test_start:
+        print(f"\n  Phase 5: Out-of-Sample Validierung ({test_start} -> {end})...")
+        oos_result = _test_params(best_final["params"], symbols, test_start, end, balance)
+        if "error" not in oos_result:
+            print(f"\n  OOS-Ergebnis (ungesehene Daten):")
+            _print_result(oos_result)
+            # Warnung bei starkem Overfitting
+            train_pf = best_final.get("profit_factor", 0)
+            oos_pf = oos_result.get("profit_factor", 0)
+            if train_pf > 0 and oos_pf > 0:
+                degradation = (train_pf - oos_pf) / train_pf * 100
+                if degradation > 50:
+                    print(f"\n  WARNUNG: Starkes Overfitting! Train-PF={train_pf:.2f} -> OOS-PF={oos_pf:.2f} ({degradation:.0f}% Degradation)")
+                elif degradation > 20:
+                    print(f"\n  HINWEIS: Moderates Overfitting ({degradation:.0f}% Degradation)")
+                else:
+                    print(f"\n  ROBUST: OOS-Degradation nur {degradation:.0f}% -- Parameter generalisieren gut!")
+        else:
+            print(f"\n  OOS-Fehler: {oos_result.get('error', 'unbekannt')}")
+
     # ── Zusammenfassung ──────────────────────────────────────
     print(f"\n{'='*65}")
     print(f"  OPTIMALE PARAMETER:")
     print(f"{'='*65}")
     for k, v in best_final["params"].items():
         print(f"  {k:30s} = {v}")
-    print(f"\n  Ergebnis:")
+    print(f"\n  Train-Ergebnis:")
     _print_result(best_final)
+    if oos_result and "error" not in oos_result:
+        print(f"\n  OOS-Ergebnis:")
+        _print_result(oos_result)
     print(f"{'='*65}")
 
     return best_final
