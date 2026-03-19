@@ -53,7 +53,7 @@ MAX_TRADE_USDT       = float(os.getenv("MAX_TRADE_USDT", 100.0))
 MAX_OPEN_POSITIONS   = 3     # Max 3 gleichzeitig, aber nie 2 aus gleicher Gruppe
 MAX_PER_GROUP        = 1     # Korrelations-Schutz: max 1 Trade pro Gruppe
 SL_ATR_MULTIPLIER    = 1.0   # Engerer SL (optimiert via Backtest)
-TRAIL_ATR_MULTIPLIER = 1.5   # Trailing Stop: 1.5x ATR hinter Preis (optimiert)
+TRAIL_ATR_MULTIPLIER = 2.5   # Trailing Stop: 2.5x ATR hinter Preis (optimiert v2)
 TP1_RR               = 2.0   # Erste TP bei 2:1 → 50% schließen
 TP2_RR               = 4.0   # Zweite TP bei 4:1 → Rest schließen
 MIN_CRV              = 2.0
@@ -79,7 +79,7 @@ SL_ATR_MAX           = 2.5         # Maximum SL in ATR (volatiler Markt)
 VOL_LOOKBACK         = 20          # Perioden für Volatilitäts-Berechnung
 
 # ── Enhanced Trailing Stop ───────────────────────────────────
-TRAIL_STEP_PCT       = 0.5         # SL in 0.5%-Stufen nachziehen (optimiert)
+TRAIL_STEP_PCT       = 0.8         # SL in 0.8%-Stufen nachziehen (optimiert v2)
 TRAIL_ACTIVATION_RR  = 1.5         # Trailing erst nach 1.5:1 R:R aktivieren (optimiert)
 
 # ── Fees ─────────────────────────────────────────────────────
