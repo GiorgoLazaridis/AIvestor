@@ -43,8 +43,8 @@ VOLUME_AVG_PERIOD = 20
 
 # ── Signal-Scoring ───────────────────────────────────────────
 # Jedes Signal hat Gewichtung 1–3. Mindest-Score zum Traden:
-MIN_SCORE         = 8   # von max. 12 (optimiert via Backtest)
-HIGH_CONF_SCORE   = 10  # "starkes" Signal → größere Position
+MIN_SCORE         = 8   # von max. 14 (optimiert via Backtest)
+HIGH_CONF_SCORE   = 11  # "starkes" Signal → größere Position
 
 # ── Risiko-Management ────────────────────────────────────────
 ACCOUNT_RISK_BASE    = float(os.getenv("ACCOUNT_RISK_PERCENT", 1.0))  # % bei normalem Signal
@@ -95,7 +95,7 @@ PYRAMID_TRIGGER_RR   = 1.5         # Nachkauf bei 1.5:1 R:R im Plus
 LOOP_INTERVAL_SECONDS = 60
 
 # ── Backtest ─────────────────────────────────────────────────
-BACKTEST_START        = "2024-06-01"   # Startdatum für Backtest
+BACKTEST_START        = "2024-01-01"   # Startdatum für Backtest (2+ Jahre)
 BACKTEST_INITIAL_USDT = 1000.0         # Start-Kapital
 BACKTEST_SLIPPAGE_PCT = 0.05           # Simulierter Slippage in %
 BACKTEST_DATA_DIR     = "backtest_data" # Cache-Ordner für historische Daten

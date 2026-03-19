@@ -1,17 +1,19 @@
 """
-Multi-Timeframe Signal Engine mit Scoring-System.
+Multi-Timeframe Signal Engine v2 mit orthogonalem Scoring-System.
 
-Scoring (max 12 Punkte):
-  4H-Trend-Alignment      = 3 Punkte  (stärkster Filter)
-  1H-Struktur-Bestätigung = 2 Punkte
-  15m EMA-Alignment       = 2 Punkte
-  RSI-Momentum            = 2 Punkte
-  MACD-Crossover          = 2 Punkte
-  Volume-Bestätigung      = 1 Punkt
-  ─────────────────────────────────
-  MAX                     = 12 Punkte
-  MIN zum Traden          = 7 Punkte
-  High-Confidence         = 9+ Punkte
+Jedes Signal misst etwas ANDERES (weniger Korrelation = bessere Qualitaet):
+
+Scoring (max 14 Punkte):
+  4H-Trend-Richtung       = 3 Punkte  (Wohin geht der Markt?)
+  4H/1H-Trendstaerke ADX  = 2 Punkte  (WIE STARK ist der Trend?)
+  15m Pullback-to-EMA     = 2 Punkte  (Guter Einstiegspunkt?)
+  RSI-Momentum            = 2 Punkte  (Beschleunigt der Preis?)
+  MACD-Crossover          = 2 Punkte  (Momentum-Wechsel?)
+  Volume-Surge            = 3 Punkte  (Institutionelle Beteiligung?)
+  ----------------------------------------------------------
+  MAX                     = 14 Punkte
+  MIN zum Traden          = 8 Punkte
+  High-Confidence         = 11+ Punkte
 """
 import pandas as pd
 from dataclasses import dataclass, field
@@ -57,31 +59,49 @@ def _score_4h_trend(df4h: pd.DataFrame) -> tuple[str | None, int, str]:
     return None, 0, "4H: kein klarer Trend"
 
 
-def _score_1h_structure(df1h: pd.DataFrame) -> tuple[str | None, int, str]:
-    """1H-Struktur: Bestätigung. Wert: 2 Punkte."""
-    r = df1h.iloc[-1]
-    bullish = r["ema_fast"] > r["ema_mid"] and r["close"] > r["ema_mid"]
-    bearish = r["ema_fast"] < r["ema_mid"] and r["close"] < r["ema_mid"]
-    rsi_ok_bull = 40 < r["rsi"] < 70
-    rsi_ok_bear = 30 < r["rsi"] < 60
+def _score_trend_strength(df4h: pd.DataFrame, df1h: pd.DataFrame) -> tuple[str | None, int, str]:
+    """ADX Trend-Staerke auf 4H/1H. Wert: 0-2 Punkte.
+    Misst WIE STARK der Trend ist, nicht nur die Richtung."""
+    r4h = df4h.iloc[-1]
+    r1h = df1h.iloc[-1]
+    adx_4h = r4h.get("adx", 0) or 0
+    adx_1h = r1h.get("adx", 0) or 0
 
-    if bullish and rsi_ok_bull:
-        return "BUY", 2, f"1H-Struktur bullish, RSI={r['rsi']:.1f}"
-    if bearish and rsi_ok_bear:
-        return "SELL", 2, f"1H-Struktur bearish, RSI={r['rsi']:.1f}"
-    return None, 0, "1H: keine klare Struktur"
+    # Richtung aus 4H ableiten
+    bullish_4h = r4h["ema_fast"] > r4h["ema_slow"]
+    direction = "BUY" if bullish_4h else "SELL"
+
+    # Beide Timeframes starker Trend
+    if adx_4h >= 30 and adx_1h >= 25:
+        return direction, 2, f"Starker Trend (4H-ADX={adx_4h:.0f}, 1H-ADX={adx_1h:.0f})"
+    # Mindestens ein Timeframe starker Trend
+    if adx_4h >= 25 or adx_1h >= 25:
+        return direction, 1, f"Moderater Trend (4H-ADX={adx_4h:.0f}, 1H-ADX={adx_1h:.0f})"
+    return None, 0, f"Schwacher Trend (4H-ADX={adx_4h:.0f}, 1H-ADX={adx_1h:.0f})"
 
 
-def _score_15m_ema(df15: pd.DataFrame) -> tuple[str | None, int, str]:
-    """15m EMA-Alignment. Wert: 2 Punkte."""
+def _score_pullback_entry(df15: pd.DataFrame) -> tuple[str | None, int, str]:
+    """Pullback-Entry: Preis nahe EMA = guter Einstieg. Wert: 0-2 Punkte.
+    Misst ob der Entry-Zeitpunkt guenstig ist (Pullback statt Chase)."""
     r = df15.iloc[-1]
-    bullish = r["ema_fast"] > r["ema_mid"] > r["ema_slow"]
-    bearish = r["ema_fast"] < r["ema_mid"] < r["ema_slow"]
+    pullback = r.get("pullback_pct", 0) or 0
+    bullish = r["ema_fast"] > r["ema_slow"]
+
     if bullish:
-        return "BUY", 2, f"15m EMA bullish (9>{config.EMA_MID}>{config.EMA_SLOW})"
-    if bearish:
-        return "SELL", 2, f"15m EMA bearish (9<{config.EMA_MID}<{config.EMA_SLOW})"
-    return None, 0, "15m EMA: kein Alignment"
+        # Pullback zum EMA: Preis knapp ueber EMA mid (0-1.5% drueber)
+        if 0 < pullback <= 0.5:
+            return "BUY", 2, f"Perfekter Pullback zu EMA ({pullback:.1f}% ueber EMA)"
+        if 0.5 < pullback <= 1.5:
+            return "BUY", 1, f"Leichter Pullback ({pullback:.1f}% ueber EMA)"
+        if pullback > 2.5:
+            return None, 0, f"Zu weit von EMA ({pullback:.1f}%) — Chase-Risiko"
+    else:
+        if -0.5 < pullback <= 0:
+            return "SELL", 2, f"Perfekter Pullback zu EMA ({pullback:.1f}%)"
+        if -1.5 < pullback <= -0.5:
+            return "SELL", 1, f"Leichter Pullback ({pullback:.1f}%)"
+
+    return None, 0, f"Kein Pullback-Entry ({pullback:.1f}%)"
 
 
 def _score_rsi(df15: pd.DataFrame) -> tuple[str | None, int, str]:
@@ -121,12 +141,17 @@ def _score_macd(df15: pd.DataFrame) -> tuple[str | None, int, str]:
 
 
 def _score_volume(df15: pd.DataFrame) -> tuple[str | None, int, str]:
-    """Volume-Bestätigung. Wert: 1 Punkt."""
+    """Volume-Surge Erkennung. Wert: 1-3 Punkte.
+    Hohes Volume = institutionelle Beteiligung = staerkstes Konfirmationssignal."""
     r = df15.iloc[-1]
     ratio = r["volume_ratio"]
+    if ratio >= 3.0:
+        return "CONFIRM", 3, f"Volume SURGE {ratio:.1f}x (institutionell)"
+    if ratio >= 2.0:
+        return "CONFIRM", 2, f"Volume stark {ratio:.1f}x"
     if ratio >= 1.5:
-        return "CONFIRM", 1, f"Volume {ratio:.2f}x über Durchschnitt"
-    return None, 0, f"Volume {ratio:.2f}x (zu gering)"
+        return "CONFIRM", 1, f"Volume {ratio:.1f}x ueber Durchschnitt"
+    return None, 0, f"Volume {ratio:.1f}x (zu gering)"
 
 
 def generate_signal(symbol: str, dfs: dict) -> Signal:
@@ -144,8 +169,8 @@ def generate_signal(symbol: str, dfs: dict) -> Signal:
 
     checks = [
         _score_4h_trend(df4h),
-        _score_1h_structure(df1h),
-        _score_15m_ema(df15),
+        _score_trend_strength(df4h, df1h),
+        _score_pullback_entry(df15),
         _score_rsi(df15),
         _score_macd(df15),
         _score_volume(df15),
@@ -177,14 +202,14 @@ def generate_signal(symbol: str, dfs: dict) -> Signal:
         return Signal(
             action="NO TRADE", symbol=symbol, score=sell_score,
             scored_signals=scored,
-            reason=f"SELL-Signal (Score {sell_score}/12) — Spot-only, kein Short möglich"
+            reason=f"SELL-Signal (Score {sell_score}/14) — Spot-only, kein Short möglich"
         )
     else:
         dominant = max(buy_score, sell_score)
         return Signal(
             action="NO TRADE", symbol=symbol, score=dominant,
             scored_signals=scored,
-            reason=f"Score {dominant}/12 — Minimum {config.MIN_SCORE} nicht erreicht"
+            reason=f"Score {dominant}/14 — Minimum {config.MIN_SCORE} nicht erreicht"
         )
 
     # ── Adaptive SL/TP basierend auf Volatilitäts-Regime ────
@@ -237,5 +262,5 @@ def generate_signal(symbol: str, dfs: dict) -> Signal:
         crv=round(crv, 2),
         atr=round(atr, 2),
         scored_signals=scored,
-        reason=f"Score {score}/12 ({confidence}) | CRV {crv:.1f}:1 (netto {net_crv:.1f}:1) | ATR={atr:.2f} | SL×{sl_mult:.1f}"
+        reason=f"Score {score}/14 ({confidence}) | CRV {crv:.1f}:1 (netto {net_crv:.1f}:1) | ATR={atr:.2f} | SL×{sl_mult:.1f}"
     )

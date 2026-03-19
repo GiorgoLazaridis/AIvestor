@@ -4,8 +4,8 @@ import pandas as pd
 import pytest
 import config
 from signal_engine import (
-    generate_signal, _score_4h_trend, _score_1h_structure,
-    _score_15m_ema, _score_rsi, _score_macd, _score_volume,
+    generate_signal, _score_4h_trend, _score_trend_strength,
+    _score_pullback_entry, _score_rsi, _score_macd, _score_volume,
 )
 
 
@@ -16,6 +16,7 @@ def _make_df(rows=5, **overrides):
         ema_fast=50050.0, ema_mid=49900.0, ema_slow=49700.0,
         rsi=50.0, macd=0.5, macd_signal=0.3, macd_hist=0.2,
         volume_avg=80.0, volume_ratio=1.25, atr=500.0,
+        adx=30.0, pullback_pct=0.3,
     )
     defaults.update(overrides)
     data = {k: [v] * rows for k, v in defaults.items()}
@@ -45,32 +46,34 @@ class TestScore4hTrend:
         assert pts == 0
 
 
-class TestScore1hStructure:
-    def test_bullish_structure(self):
-        df = _make_df(1, ema_fast=50050, ema_mid=49900, close=50000, rsi=55)
-        direction, pts, _ = _score_1h_structure(df)
+class TestScoreTrendStrength:
+    def test_strong_trend(self):
+        df4h = _make_df(1, adx=35, ema_fast=50100, ema_slow=49900)
+        df1h = _make_df(1, adx=30)
+        direction, pts, _ = _score_trend_strength(df4h, df1h)
         assert direction == "BUY"
         assert pts == 2
 
-    def test_bearish_structure(self):
-        df = _make_df(1, ema_fast=49800, ema_mid=50000, close=49900, rsi=45)
-        direction, pts, _ = _score_1h_structure(df)
-        assert direction == "SELL"
-        assert pts == 2
+    def test_weak_trend(self):
+        df4h = _make_df(1, adx=15, ema_fast=50100, ema_slow=49900)
+        df1h = _make_df(1, adx=10)
+        direction, pts, _ = _score_trend_strength(df4h, df1h)
+        assert direction is None
+        assert pts == 0
 
 
-class TestScore15mEma:
-    def test_bullish_alignment(self):
-        df = _make_df(1, ema_fast=50100, ema_mid=50000, ema_slow=49900)
-        direction, pts, _ = _score_15m_ema(df)
+class TestScorePullbackEntry:
+    def test_perfect_pullback(self):
+        df = _make_df(1, ema_fast=50100, ema_slow=49900, pullback_pct=0.3)
+        direction, pts, _ = _score_pullback_entry(df)
         assert direction == "BUY"
         assert pts == 2
 
-    def test_bearish_alignment(self):
-        df = _make_df(1, ema_fast=49800, ema_mid=49900, ema_slow=50000)
-        direction, pts, _ = _score_15m_ema(df)
-        assert direction == "SELL"
-        assert pts == 2
+    def test_chasing_price(self):
+        df = _make_df(1, ema_fast=50100, ema_slow=49900, pullback_pct=3.0)
+        direction, pts, _ = _score_pullback_entry(df)
+        assert direction is None
+        assert pts == 0
 
 
 class TestScoreRsi:
@@ -107,7 +110,7 @@ class TestScoreVolume:
         df = _make_df(1, volume_ratio=2.0)
         direction, pts, _ = _score_volume(df)
         assert direction == "CONFIRM"
-        assert pts == 1
+        assert pts == 2
 
     def test_low_volume_no_confirm(self):
         df = _make_df(1, volume_ratio=0.8)
@@ -119,17 +122,17 @@ class TestScoreVolume:
 class TestGenerateSignal:
     def _bullish_dfs(self):
         """Create DataFrames that produce a strong BUY signal."""
-        df4h = _make_df(5, ema_fast=50100, ema_mid=50000, ema_slow=49800)
+        df4h = _make_df(5, ema_fast=50100, ema_mid=50000, ema_slow=49800, adx=35)
         df4h["close"] = [49900, 50000, 50100, 50200, 50300]
 
-        df1h = _make_df(25, ema_fast=50100, ema_mid=50000, close=50200, rsi=55)
+        df1h = _make_df(25, ema_fast=50100, ema_mid=50000, close=50200, rsi=55, adx=30)
 
-        # Need >= VOL_LOOKBACK rows for adaptive SL/TP
-        # ATR=2000 ensures net CRV clears the fee-aware minimum
+        # ATR=2000, pullback=0.3, volume_ratio=2.5
         df15 = _make_df(25,
             ema_fast=50100, ema_mid=50000, ema_slow=49900,
             rsi=42, macd=0.2, macd_signal=0.1, macd_hist=0.1,
-            volume_ratio=2.0, atr=2000.0, close=50200,
+            volume_ratio=2.5, atr=2000.0, close=50200,
+            adx=30, pullback_pct=0.3,
         )
         df15.loc[df15.index[-2], "rsi"] = 38
         df15.loc[df15.index[-2], "macd"] = -0.1

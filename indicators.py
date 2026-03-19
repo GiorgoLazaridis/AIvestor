@@ -18,4 +18,15 @@ def calculate_all(df: pd.DataFrame) -> pd.DataFrame:
     df["volume_avg"]   = df["volume"].rolling(config.VOLUME_AVG_PERIOD).mean()
     df["volume_ratio"] = df["volume"] / df["volume_avg"]
     df["atr"]          = ta.atr(df["high"], df["low"], df["close"], length=14)
+
+    # ADX — Trend Strength (0-100, >25 = strong trend)
+    adx_df = ta.adx(df["high"], df["low"], df["close"], length=14)
+    if adx_df is not None and f"ADX_14" in adx_df.columns:
+        df["adx"] = adx_df["ADX_14"]
+    else:
+        df["adx"] = 0.0
+
+    # Pullback detection: distance from EMA mid (% of price)
+    df["pullback_pct"] = (df["close"] - df["ema_mid"]) / df["ema_mid"] * 100
+
     return df
