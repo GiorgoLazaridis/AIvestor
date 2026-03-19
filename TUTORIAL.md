@@ -267,19 +267,18 @@ Der Backtester zeigt am Ende einen Report:
 
 ```
 ============================================================
-  BACKTEST ERGEBNIS
+  BACKTEST ERGEBNIS (2025-01 bis 2026-03)
 ============================================================
   Startkapital:     $1,000.00
-  Endkapital:       $1,093.07
-  Gesamt-Return:    +9.31%
-  Monatl. Schnitt:  +0.43%
-  Max Drawdown:     2.06%
+  Endkapital:       $1,013.06
+  Gesamt-Return:    +1.31%
+  Max Drawdown:     3.38%
 ------------------------------------------------------------
-  Trades:           311
-  Gewinner:         137 (44.1%)
-  Verlierer:        174
-  Profit Factor:    1.64
-  Sharpe Ratio:     1.13
+  Trades:           299
+  Gewinner:         130 (43.5%)
+  Verlierer:        169
+  Profit Factor:    1.15
+  Sharpe Ratio:     0.96
 ============================================================
 ```
 
@@ -311,18 +310,19 @@ Der Optimizer testet systematisch verschiedene Parameter-Kombinationen und finde
 python optimizer.py
 ```
 
-**Achtung:** Das dauert lange (1-3 Stunden)! Der Optimizer fuehrt ~90 Backtests durch.
+**Achtung:** Das dauert lange (1-3 Stunden)! Der Optimizer fuehrt viele Backtests durch.
 
 ### 8.2 Was der Optimizer macht
 
-Er testet in 4 Phasen:
+Er testet in 5 Phasen mit 70/30 Train/Test-Split:
 
-1. **Phase 1 — Grob:** SL-Weite und Min-Score
-2. **Phase 2 — TP-Ratios:** Take-Profit-Levels
-3. **Phase 3 — Trailing:** Trailing-Stop-Parameter
-4. **Phase 4 — Timing:** Zeitbasierte Exits
+1. **Phase 1 — SL+Score:** Stop-Loss-Weite und Score-Schwellen (SL_ATR, MIN_SCORE, HIGH_CONF_SCORE)
+2. **Phase 2 — TP:** Take-Profit-Levels (TP1_RR, TP2_RR)
+3. **Phase 3 — Trailing:** Trailing-Stop-Parameter (TRAIL_ATR, TRAIL_STEP, TRAIL_ACTIVATION)
+4. **Phase 4 — Timing:** Zeitbasierte Exits (MAX_TRADE_HOURS, STALE_TRADE_HOURS)
+5. **Phase 5 — OOS-Validierung:** Bester Parameter-Satz wird auf den 30% Out-of-Sample-Daten getestet
 
-Am Ende zeigt er die optimale Kombination.
+Am Ende zeigt er die optimale Kombination und die OOS-Degradation.
 
 ### 8.3 Parameter anwenden
 

@@ -32,7 +32,7 @@ AIvestor ist ein vollautomatischer Trading-Bot für Binance, der auf einem regel
 
 ### Kernprinzipien
 
-- **Kein Gambling** — Trade nur wenn mindestens 8 von 12 möglichen Punkten erreicht
+- **Kein Gambling** — Trade nur wenn mindestens 8 von 14 möglichen Punkten erreicht
 - **Kapitalerhalt zuerst** — Trailing Stop und Partial-TP sichern Gewinne
 - **Marktbewusstsein** — BTC-Regime bestimmt ob überhaupt gehandelt wird
 - **Keine Korrelationsfallen** — Nie zwei stark korrelierte Coins gleichzeitig
@@ -45,7 +45,7 @@ AIvestor ist ein vollautomatischer Trading-Bot für Binance, der auf einem regel
 |---------|--------------|
 | **Multi-Symbol** | 8 Paare gleichzeitig: BTC, ETH, BNB, SOL, AVAX, LINK, XRP, DOT |
 | **Multi-Timeframe** | 4H Trend + 1H Struktur + 15m Entry-Präzision |
-| **Score-System** | 0–12 Punkte, mindestens 8 zum Traden |
+| **Score-System** | 0–14 Punkte, mindestens 8 zum Traden |
 | **Markt-Regime** | BTC als Marktbarometer (BULL / BEAR / NEUTRAL) |
 | **Korrelations-Schutz** | Gruppierung, max. 1 Trade pro Gruppe |
 | **Partial Take-Profit** | TP1 bei 2:1 schließt 50%, TP2 bei 4:1 schließt Rest |
@@ -56,7 +56,7 @@ AIvestor ist ein vollautomatischer Trading-Bot für Binance, der auf einem regel
 | **Dynamische Positionsgröße** | Normal 1%, High-Confidence 1.5% Risiko |
 | **Trade-Log** | Jede Entscheidung wird in `trades_log.json` dokumentiert |
 | **Backtesting** | Walk-Forward-Simulation auf historischen Daten mit Fees und Slippage |
-| **Parameter-Optimizer** | 4-Phasen-Optimierung (Grob → Fein → Timing → Validierung) |
+| **Parameter-Optimizer** | 5-Phasen-Optimierung (SL+Score → TP → Trailing → Timing → OOS-Validierung) |
 | **Risk-Manager** | Drawdown-Circuit-Breaker, Kelly-Criterion Positionsgröße |
 | **Testnet-Modus** | Vollständiges Testen ohne echtes Geld |
 
@@ -240,16 +240,16 @@ MAX_PER_GROUP      = 1     # Max. 1 Trade pro Korrelations-Gruppe
 ### Signal-Schwellenwerte
 
 ```python
-MIN_SCORE       = 8    # Mindest-Score für einen Trade (von 12) — optimiert via Backtest
-HIGH_CONF_SCORE = 10   # "Starkes" Signal → größere Position
+MIN_SCORE       = 8    # Mindest-Score für einen Trade (von 14) — optimiert via Backtest
+HIGH_CONF_SCORE = 11   # "Starkes" Signal → größere Position
 MIN_CRV         = 2.0  # Mindest Chance-Risiko-Verhältnis (2:1)
 ```
 
 ### Take-Profit und Stop-Loss
 
 ```python
-SL_ATR_MULTIPLIER    = 1.0  # SL = Preis ± (1.0 × ATR) — engerer SL, optimiert
-TRAIL_ATR_MULTIPLIER = 1.5  # Trailing SL = Preis - (1.5 × ATR), optimiert
+SL_ATR_MULTIPLIER    = 2.0  # SL = Preis ± (2.0 × ATR) — optimiert
+TRAIL_ATR_MULTIPLIER = 2.5  # Trailing SL = Preis - (2.5 × ATR), optimiert
 TP1_RR               = 2.0  # TP1 bei 2:1 → 50% schließen
 TP2_RR               = 4.0  # TP2 bei 4:1 → Rest schließen
 ```
@@ -259,7 +259,7 @@ TP2_RR               = 4.0  # TP2 bei 4:1 → Rest schließen
 ```python
 MAX_TRADE_HOURS     = 48   # Breakeven-Exit falls TP1 nicht erreicht — optimiert
 STALE_TRADE_HOURS   = 72   # Force-Close nach 72h — optimiert
-TRAIL_STEP_PCT      = 0.5  # SL in 0.5%-Stufen nachziehen — optimiert
+TRAIL_STEP_PCT      = 0.8  # SL in 0.8%-Stufen nachziehen — optimiert
 TRAIL_ACTIVATION_RR = 1.5  # Trailing erst nach 1.5:1 R:R — optimiert
 ```
 
@@ -326,7 +326,7 @@ python bot.py
 *****************************************************************
   TESTNET-MODUS — kein echtes Geld
   Symbole (8): BTCUSDT, ETHUSDT, BNBUSDT, SOLUSDT, ...
-  Strategie: MTF (4H+1H+15m) | Min-Score: 8/12
+  Strategie: MTF (4H+1H+15m) | Min-Score: 8/14
   Max Positionen: 3 (max 1 pro Gruppe)
 *****************************************************************
 
@@ -337,8 +337,8 @@ python bot.py
   Offene Positionen: 1/3
 =================================================================
 
-  ETHUSDT [Gruppe A] | BUY | Score: 9/12 [*********...]
-    Score 9/12 (HIGH) | CRV 2.1:1 | ATR=45.20
+  ETHUSDT [Gruppe A] | BUY | Score: 9/14 [*********.....]
+    Score 9/14 (NORMAL) | CRV 2.1:1 | ATR=45.20
     Entry: $2,327.00 | SL: $2,259.20 | TP1: $2,462.60 | TP2: $2,598.20
 
   Öffne Long: ETHUSDT...
@@ -351,22 +351,22 @@ python bot.py
 
 ## Signal-System
 
-### Score-Tabelle (max. 12 Punkte)
+### Score-Tabelle (max. 14 Punkte)
 
 | Signal | Punkte | Beschreibung |
 |--------|--------|--------------|
-| **4H Trend-Alignment** | 2–3 | EMA 9>21>50 + 3 steigende Kerzen = 3 Punkte |
-| **1H Struktur** | 0–2 | EMA-Ausrichtung + RSI in Range |
-| **15m EMA-Alignment** | 0–2 | EMA 9>21>50 auf Entry-Timeframe |
-| **RSI-Momentum** | 0–2 | RSI steigt aus überverkauft = 2 Punkte |
-| **MACD-Crossover** | 0–2 | Frischer Crossover = 2, bereits drüber = 1 |
-| **Volume-Bestätigung** | 0–1 | Volume ≥ 1.5x Durchschnitt |
+| **4H Trend-Richtung** | 0–3 | Wohin geht der Markt? |
+| **4H/1H Trendstaerke ADX** | 0–2 | Wie stark ist der Trend? |
+| **15m Pullback-to-EMA** | 0–2 | Guter Einstiegspunkt? |
+| **RSI-Momentum** | 0–2 | Beschleunigt der Preis? |
+| **MACD-Crossover** | 0–2 | Momentum-Wechsel? |
+| **Volume-Surge** | 0–3 | Institutionelle Beteiligung? |
 
 ### Entscheidungslogik
 
 ```
-Score ≥ 10 →  HIGH-CONFIDENCE Trade (1.5% Risiko)
-Score 8–9  →  NORMAL Trade (1.0% Risiko)
+Score ≥ 11 →  HIGH-CONFIDENCE Trade (1.5% Risiko)
+Score 8–10 →  NORMAL Trade (1.0% Risiko)
 Score < 8  →  NO TRADE
 ```
 
@@ -402,14 +402,14 @@ Beispiel ($1.000 Konto, BTC bei $74.000, SL bei $72.850):
 
 ```
 Nach Entry:
-  SL = aktueller Preis - (1.5 × ATR)
+  SL = aktueller Preis - (2.5 × ATR)
 
 Aktivierung: erst nach 1.5:1 R:R im Plus
-Nachziehen: in 0.5%-Stufen (reduziert Whipsaw)
+Nachziehen: in 0.8%-Stufen (reduziert Whipsaw)
 
 Bei jedem neuen Preishoch:
-  Neuer SL = neues Hoch - (1.5 × ATR)
-  (Nur wenn neuer SL > alter SL + 0.5%)
+  Neuer SL = neues Hoch - (2.5 × ATR)
+  (Nur wenn neuer SL > alter SL + 0.8%)
 
 Nach TP1:
   SL = Entry-Preis (Breakeven)
@@ -512,26 +512,27 @@ Der Backtester simuliert die exakte Strategie auf historischen Klines-Daten:
 python optimizer.py
 ```
 
-4-Phasen-Optimierung:
+5-Phasen-Optimierung mit 70/30 Train/Test-Split:
 
 | Phase | Parameter | Beschreibung |
 |-------|-----------|--------------|
-| 1 — Grob | SL_ATR, MIN_SCORE, TP1_RR, TP2_RR | Kernparameter breit scannen |
-| 2 — Fein | TRAIL_ATR, TRAIL_STEP, TRAIL_ACTIVATION | Trailing-Stop feinjustieren |
-| 3 — Timing | MAX_TRADE_HOURS, STALE_TRADE_HOURS | Zeitbasierte Exits optimieren |
-| 4 — Validierung | Alle | Bester Parameter-Satz auf vollem Zeitraum testen |
+| 1 — SL+Score | SL_ATR, MIN_SCORE, HIGH_CONF_SCORE | Stop-Loss-Weite und Score-Schwellen |
+| 2 — TP | TP1_RR, TP2_RR | Take-Profit-Levels optimieren |
+| 3 — Trailing | TRAIL_ATR, TRAIL_STEP, TRAIL_ACTIVATION | Trailing-Stop feinjustieren |
+| 4 — Timing | MAX_TRADE_HOURS, STALE_TRADE_HOURS | Zeitbasierte Exits optimieren |
+| 5 — OOS-Validierung | Alle | Bester Parameter-Satz auf 30% Out-of-Sample-Daten testen |
 
 ### Optimierte Parameter (Backtest-Ergebnis)
 
-Die folgenden Parameter wurden durch die 4-Phasen-Optimierung auf historischen Daten (8 Symbole, ab 2024-06-01) ermittelt und in `config.py` gesetzt:
+Die folgenden Parameter wurden durch die 5-Phasen-Optimierung auf historischen Daten (8 Symbole, 2025-01 bis 2026-03, 70/30 Train/Test-Split) ermittelt und in `config.py` gesetzt:
 
 | Parameter | Vorher | Optimiert | Auswirkung |
 |-----------|--------|-----------|------------|
-| `SL_ATR_MULTIPLIER` | 1.5 | **1.0** | Engerer SL, weniger Verlust pro Trade |
+| `SL_ATR_MULTIPLIER` | 1.5 | **2.0** | Breiterer SL, weniger Noise-Exits |
 | `MIN_SCORE` | 7 | **8** | Weniger, aber qualitativ bessere Trades |
-| `HIGH_CONF_SCORE` | 9 | **10** | Strengere High-Confidence-Schwelle |
-| `TRAIL_ATR_MULTIPLIER` | 1.0 | **1.5** | Breiterer Trailing, weniger Whipsaw |
-| `TRAIL_STEP_PCT` | 0.3 | **0.5** | Gröbere Stufen, weniger vorzeitige Exits |
+| `HIGH_CONF_SCORE` | 9 | **11** | Strengere High-Confidence-Schwelle |
+| `TRAIL_ATR_MULTIPLIER` | 1.0 | **2.5** | Breiterer Trailing, weniger Whipsaw |
+| `TRAIL_STEP_PCT` | 0.3 | **0.8** | Gröbere Stufen, weniger vorzeitige Exits |
 | `TRAIL_ACTIVATION_RR` | 1.0 | **1.5** | Trailing erst bei stabilerem Profit |
 | `MAX_TRADE_HOURS` | 24 | **48** | Mehr Zeit für TP1 |
 | `STALE_TRADE_HOURS` | 48 | **72** | Weniger Force-Closes |
@@ -560,7 +561,7 @@ AIvestor/
 ├── logger.py             # Trade-Dokumentation (trades_log.json)
 │
 ├── backtester.py         # Backtesting-Engine (Walk-Forward, Fees, Slippage)
-├── optimizer.py          # 4-Phasen Parameter-Optimizer
+├── optimizer.py          # 5-Phasen Parameter-Optimizer
 │
 ├── main.py               # Legacy Entry-Point (→ bot.py)
 ├── requirements.txt      # Python-Abhängigkeiten
